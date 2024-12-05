@@ -181,7 +181,7 @@ namespace Microsoft.DotNet.RemoteExecutor
                                     {
                                         try
                                         {
-                                            using (DataTarget dt = DataTarget.AttachToProcess(Process.Id, msecTimeout: 20_000)) // arbitrary timeout
+                                            using (DataTarget dt = DataTarget.AttachToProcess(Process.Id, suspend: true))
                                             {
                                                 ClrRuntime runtime = dt.ClrVersions.FirstOrDefault()?.CreateRuntime();
                                                 if (runtime != null)
@@ -191,22 +191,19 @@ namespace Microsoft.DotNet.RemoteExecutor
                                                     foreach (ClrThread thread in runtime.Threads.Where(t => t.IsAlive))
                                                     {
                                                         string threadKind =
-                                                            thread.IsThreadpoolCompletionPort ? "[Thread pool completion port]" :
-                                                            thread.IsThreadpoolGate ? "[Thread pool gate]" :
-                                                            thread.IsThreadpoolTimer ? "[Thread pool timer]" :
-                                                            thread.IsThreadpoolWait ? "[Thread pool wait]" :
-                                                            thread.IsThreadpoolWorker ? "[Thread pool worker]" :
+                                                            HasFlag(thread.State, ClrThreadState.TS_CompletionPortThread) ? "[Thread pool completion port]" :
+                                                            HasFlag(thread.State, ClrThreadState.TS_TPWorkerThread) ? "[Thread pool worker]" :
                                                             thread.IsFinalizer ? "[Finalizer]" :
-                                                            thread.IsGC ? "[GC]" :
+                                                            thread.IsGc ? "[GC]" :
                                                             "";
 
-                                                        string isBackground = thread.IsBackground ? "[Background]" : "";
-                                                        string apartmentModel = thread.IsMTA ? "[MTA]" :
-                                                                                thread.IsSTA ? "[STA]" :
+                                                        string isBackground = HasFlag(thread.State, ClrThreadState.TS_Background) ? "[Background]" : "";
+                                                        string apartmentModel = HasFlag(thread.State, ClrThreadState.TS_InMTA) ? "[MTA]" :
+                                                                                HasFlag(thread.State, ClrThreadState.TS_InSTA) ? "[STA]" :
                                                                                 "";
 
                                                         description.AppendLine($"\t\tThread #{thread.ManagedThreadId} (OS 0x{thread.OSThreadId:X}) {threadKind} {isBackground} {apartmentModel}");
-                                                        foreach (ClrStackFrame frame in thread.StackTrace)
+                                                        foreach (ClrStackFrame frame in thread.EnumerateStackTrace())
                                                         {
                                                             description.AppendLine($"\t\t\t{frame}");
                                                         }
@@ -270,6 +267,9 @@ namespace Microsoft.DotNet.RemoteExecutor
                 }
             }
         }
+
+        private static bool HasFlag(ClrThreadState flags, ClrThreadState flag)
+            => (flags & flag) == flag;
 
         ~RemoteInvokeHandle()
         {
